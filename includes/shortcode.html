@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>vTables</title>
+    <link
+      href="../dist/spa/css/material-icons-font-dist.css"
+      rel="stylesheet"
+      type="text/css"
+    />
+    <link
+      href="../dist/spa/css/quasar.prod.css"
+      rel="stylesheet"
+      type="text/css"
+    />
+    <link href="../dist/spa/css/vtables.css" rel="stylesheet" type="text/css" />
+  </head>
+
+  <body>
+    <div class="vtable q-pa-sm">
+      <q-table
+        v-if="selectedTable"
+        v-model:pagination="settings.bottom.initial"
+        :class="tableCssClasses"
+        :columns="columns"
+        :rows="rows"
+        :grid="settings.general.grid"
+        :bordered="settings.general.bordered"
+        :table-style="tableStyle"
+        :card-class="cardClasses"
+        :card-style="cardStyle"
+        :dark="settings.general.dark"
+        :dense="settings.general.dense"
+        :flat="settings.general.flat || !selectedTable.source.rows.length"
+        :square="settings.general.square"
+        :separator="settings.general.separator"
+      >
+        <!-- TOP -->
+        <template #top="props">
+          <div class="vtable__top | full-width flex" :class="topClasses">
+            <div v-if="!settings.top.hideTitle" class="col">
+              <h1
+                class="q-mt-xs q-mr-xs q-mb-xs q-ml-none text-h5"
+                :class="
+                    settings.top.textColor
+                      ? `text-${settings.top.textColor}`
+                      : `text-${settings.general.textColor}`
+                  "
+              >
+                {{ selectedTable.title }}
+              </h1>
+            </div>
+          </div>
+        </template>
+
+        <!-- BODY -->
+        <template #body="props">
+          <q-tr :props="props">
+            <q-td v-for="col in props.cols" :key="col.name" :props="props">
+              {{ props.row[col.field] || props.row[col.label] }}
+            </q-td>
+          </q-tr>
+        </template>
+
+        <!-- GRID -->
+        <template v-if="settings.general.grid" #item="props">
+          <div
+            class="vtable__grid | q-pa-xs col-xs-12 col-sm-6 col-md-4 grid-style-transition"
+            :class="gridColumnWidth"
+          >
+            <q-card
+              class="q-pt-sm full-height"
+              :bordered="props.bordered"
+              :dark="props.dark"
+              :dense="props.dense"
+              :flat="props.flat"
+              :square="props.square"
+              :class="[
+                  `bg-${settingsGeneralBackgroundColor}`,
+                  props.cardClass,
+                ]"
+            >
+              <q-list>
+                <q-item v-for="col in props.cols" :key="col.name">
+                  <q-item-section v-if="col.value">
+                    <q-item-label
+                      caption
+                      :class="`text-${settingsGeneralTextColor}`"
+                    >
+                      {{ col.label }}
+                    </q-item-label>
+                    <q-item-label
+                      :class="[
+                          `text-${settingsGeneralTextColor}`,
+                        ]"
+                    >
+                      <div
+                        v-if="renderLinksAsLinks(col.value)"
+                        class="flex gap-5"
+                      >
+                        <template
+                          v-for="link in col.value.split(' ')"
+                          :key="link"
+                        >
+                          <a
+                            :href="link"
+                            target="_blank"
+                            :class="`text-${settings.content.buttonTextColor}`"
+                          >
+                            <span v-if="settings.content.buttonText">
+                              {{ settings.content.buttonText }}
+                            </span>
+                            <span v-else> Link </span>
+                          </a>
+                        </template>
+                      </div>
+                      <div v-else class="cell-value">{{ col.value }}</div>
+                    </q-item-label>
+                  </q-item-section>
+                </q-item>
+              </q-list>
+            </q-card>
+          </div>
+        </template>
+      </q-table>
+
+      <!-- Show empty table while loading -->
+      <q-table
+        v-else-if="loading"
+        :loading="loading"
+        :rows="[]"
+        :columns="[]"
+      ></q-table>
+
+      <!-- Show empty table if no data -->
+      <q-table
+        v-else
+        :rows="[]"
+        :columns="[]"
+        :no-data-label="noDataLabel"
+      ></q-table>
+    </div>
+
+    <!-- Add the following at the end of your body tag -->
+    <script src="../dist/spa/js/vue.global.prod.js"></script>
+    <script src="../dist/spa/js/quasar.umd.prod.js"></script>
+
+    <script>
+      const iframe = window.frameElement;
+      const dataId = iframe.getAttribute('data-id');
+      const dataCount = iframe.getAttribute('data-count');
+      const baseUrl = iframe.getAttribute('data-baseurl');
+      const table = document.querySelector('.vtable');
+
+      if (table) {
+        // Set attribute
+        table.setAttribute('id', 'vtable-' + dataCount);
+        // Add class
+        table.classList.add('vtable-' + dataId);
+      }
+
+      // Vue instance
+      const app = Vue.createApp({
+        data() {
+          return {
+            dataCount: null,
+            dataId: null,
+            selectedTable: null,
+            loading: false,
+            title: '',
+            columns: [],
+            rows: [],
+            settings: {},
+            initialPagination: {},
+            settingsSearchFilter: '',
+            showFullImage: false,
+            imagePath: '',
+            tableMaximized: false,
+          };
+        },
+        async mounted() {
+          this.loading = true;
+          this.dataCount = dataCount;
+          this.dataId = dataId;
+
+          // Fetch data
+          try {
+            this.selectedTable = await this.getTable(dataId);
+          } catch (error) {
+            console.log(error);
+          }
+
+          this.loading = false;
+
+          // Set height of iframe if no data
+          if (!this.selectedTable) {
+            iframe.style.height = '70px';
+            return;
+          }
+
+          // Descruct data
+          const { source, settings, title } = this.selectedTable;
+
+          // Assign data
+          this.columns = source.columns;
+          this.rows = source.rows;
+          this.settings = settings;
+          this.initialPagination = settings.bottom.initial;
+          this.title = title;
+
+          // Dynamic Height
+          this.$nextTick(() => {
+            const bodyHeight = document.body.clientHeight;
+            iframe.style.minHeight = bodyHeight + 20 + 'px';
+          });
+
+          // Dynamic width
+          if (this.settings.dimensions.tableMaxWidth) {
+            iframe.style.maxWidth =
+              this.settings.dimensions.tableMaxWidth + 'px';
+          }
+
+          // Add event listener
+          window.addEventListener('resize', this.handleResize);
+        },
+        beforeDestroy() {
+          // Destroy event listener
+          window.removeEventListener('resize', this.handleResize);
+        },
+        computed: {
+          // Table style computed prop.
+          tableStyle() {
+            if (Object.keys(this.settings).length) {
+              return {
+                height: this.settings.dimensions.tableHeight
+                  ? this.settings.dimensions.tableHeight + 'px'
+                  : '100%',
+              };
+            }
+
+            return '';
+          },
+
+          // No data label computed prop.
+          noDataLabel() {
+            if (!this.selectedTable) {
+              return 'Table with this shortcode does not exist';
+            }
+
+            return 'No data available';
+          },
+
+          // Card classes computed prop.
+          cardClasses() {
+            if (Object.keys(this.settings).length) {
+              const cssClasses = [this.settings.customCss.cardClass];
+
+              if (this.settings.general.backgroundColor) {
+                cssClasses.push(`bg-${this.settings.general.backgroundColor}`);
+              }
+
+              if (this.settings.general.textColor) {
+                cssClasses.push(`text-${this.settings.general.textColor}`);
+              }
+
+              return cssClasses;
+            }
+
+            return [];
+          },
+
+          // Card style computed prop.
+          cardStyle() {
+            if (Object.keys(this.settings).length) {
+              return {
+                maxWidth: this.settings.general.tableMaxWidth
+                  ? this.settings.general.tableMaxWidth + 'px'
+                  : '100%',
+              };
+            }
+
+            return '';
+          },
+
+          // Top classes computed prop.
+          topClasses() {
+            if (Object.keys(this.settings).length) {
+              const cssClasses = [];
+
+              if (this.settings.top.topBackgroundColor) {
+                cssClasses.push(`bg-${this.settings.top.topBackgroundColor}`);
+              }
+
+              if (this.settings.top.textColor) {
+                cssClasses.push(`text-${this.settings.top.textColor}`);
+              }
+
+              return cssClasses;
+            }
+
+            return [];
+          },
+
+          // Table CSS classes computed prop.
+          tableCssClasses() {
+            const isAdminbarPresented = document.querySelector('#wpadminbar');
+            return [
+              { 'sticky-header-table': this.settings.top.stickyHeader },
+              {
+                'sticky-column-first': this.settings.columns.stickyFirstColumn,
+              },
+              { 'sticky-column-last': this.settings.columns.stickyLastColumn },
+              {
+                'admin-bar-presented-on-fullscreen':
+                  this.tableMaximized && isAdminbarPresented,
+              },
+            ];
+          },
+
+          // Grid column width computed prop.
+          gridColumnWidth() {
+            if (
+              this.settings.bottom.initial &&
+              this.settings.bottom.initial.rowsPerPage
+            ) {
+              return `col-sm-${12 / this.settings.bottom.initial.rowsPerPage}`;
+            }
+            return 'col-sm-3';
+          },
+
+          // General text color computed prop.
+          settingsGeneralTextColor() {
+            if (Object.keys(this.settings).length) {
+              return this.settings.general.textColor;
+            }
+            return '';
+          },
+
+          // General background color computed prop.
+          settingsGeneralBackgroundColor() {
+            if (Object.keys(this.settings).length) {
+              return this.settings.general.backgroundColor;
+            }
+            return '';
+          },
+        },
+        setup() {
+          /**
+           * FETCH TABLE
+           */
+          async function getTable(id) {
+            const base = baseUrl || '/wp-json/';
+            const post = await fetch(`${base}vtables/v1/tables/${id}`).then(
+              (resp) => resp.json()
+            );
+
+            if (!post || post?.data?.status === 404) {
+              return;
+            }
+
+            return post.data;
+          }
+
+          /**
+           * CHECK IF LINK
+           * @param str
+           */
+          function getLinkType(str) {
+            const regex = /http|https|jpg|jpeg|png|gif|bmp|tiff|webp|svg/i;
+
+            if (!regex.test(str)) {
+              return;
+            }
+
+            const linkPattern = /^(https?:\/\/\S+)$/i;
+            const imageExtensions = /\.(jpg|jpeg|png|gif|bmp|tiff|webp|svg)$/i;
+            const strArr = str.split(' ');
+            const isLinks = strArr.every((el) => linkPattern.test(el));
+            const isImages = strArr.every((el) => imageExtensions.test(el));
+
+            if (isImages) {
+              return 'images';
+            }
+
+            if (isLinks) {
+              return 'links';
+            }
+          }
+
+          /**
+           * RENDER LINKS AS LINKS
+           * @param value
+           */
+          function renderLinksAsLinks(value) {
+            if (!Object.keys(this.settings).length) {
+              return;
+            }
+
+            return (
+              (!this.settings.content.turnLinksToImages &&
+                getLinkType(value) === 'images') ||
+              getLinkType(value) === 'links'
+            );
+          }
+
+          /**
+           * HANDLE RESIZE
+           */
+          function handleResize() {
+            const bodyHeight = document.body.clientHeight;
+            iframe.style.minHeight = bodyHeight + 20 + 'px';
+          }
+
+          return {
+            getTable,
+            renderLinksAsLinks,
+            getLinkType,
+            handleResize,
+          };
+        },
+      });
+
+      app.use(Quasar);
+      app.mount('#vtable-' + dataCount);
+    </script>
+  </body>
+</html>
